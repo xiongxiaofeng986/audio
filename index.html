@@ -42,15 +42,20 @@ button{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-ra
 .tw .h{color:var(--mut);font-size:11px}
 .note{font-size:11px;color:var(--mut);line-height:1.7}
 .seg{display:flex;gap:6px;margin-bottom:14px}.seg button{flex:1;margin:0;padding:9px 8px;font-size:13px}.seg button.on{background:var(--ac);border-color:var(--ac);color:#fff}
+#seg2 button{font-size:12px;padding:9px 2px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.chip{margin:0;padding:6px 10px;font-size:12px}.chip.on{background:var(--ac);border-color:var(--ac);color:#fff}
+#mcov{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:13px;margin-top:10px}
 </style>
 </head>
 <body>
 <h1>低音阵列计算器</h1>
-<p class="sub">水平电子弧形（延时成弧）· 等间距直线阵 · 全指向点声源模型</p>
+<p class="sub">水平电子弧形（延时成弧）· 等间距直线阵 · 全指向 / 理想心形点声源模型</p>
 
 <div class="card">
   <div class="lbl">阵列类型</div>
   <div class="seg" id="seg"><button data-m="line">普通直线阵列</button><button data-m="arc" class="on">电子水平弧形阵列</button></div>
+  <div class="lbl">单元指向特性</div>
+  <div class="seg" id="seg3"><button data-c="0" class="on">全指向</button><button data-c="1">心形</button></div>
   <div class="lbl">输入参数</div>
   <div class="row"><div class="rh"><span>阵列点数量</span><b id="vN"></b></div><input type="range" id="N" min="2" max="16" step="1" value="6"></div>
   <div class="row"><div class="rh"><span>点间距（中心到中心）</span><b id="vD"></b></div><input type="range" id="D" min="0.3" max="3" step="0.05" value="1"></div>
@@ -76,12 +81,28 @@ button{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-ra
   <div class="lbl">水平指向图（正前方在上）</div>
   <canvas id="cv"></canvas>
   <div class="row" style="margin-top:12px"><div class="rh"><span>观察频率</span><b id="vF"></b></div><input type="range" id="F" min="20" max="250" step="1" value="80"></div>
-  <div class="grid" style="margin-top:10px"><div class="m"><span>−6 dB 覆盖角（此频率）</span><b id="cov"></b></div><div class="m"><span>波长 λ</span><b id="lam"></b></div></div>
+  <div class="grid" style="margin-top:10px"><div class="m"><span>−6 dB 覆盖角（所选频带）</span><b id="cov"></b></div><div class="m"><span>波长 λ</span><b id="lam"></b></div></div>
+  <div class="lbl" style="margin-top:12px">频带宽度（倍频程，能量平均）</div>
+  <div class="seg" id="seg2"><button data-b="0">单频</button><button data-b="6">1/6 oct</button><button data-b="3" class="on">1/3 oct</button><button data-b="1">1 oct</button></div>
+  <div class="note" id="band"></div>
   <button id="jump">跳到有用上限</button>
 </div>
 
 <div class="card">
-  <div class="lbl">各点延时（中心点为 0，两端延时最大）</div>
+  <div class="lbl">阵列示意图（俯视，上方为正前方）</div>
+  <canvas id="sch"></canvas>
+</div>
+
+<div class="card">
+  <div class="lbl">多频点对比（频带宽度沿用上方设置，各频率各自归一化）</div>
+  <div class="chips" id="chips"></div>
+  <canvas id="cv2"></canvas>
+  <div class="lbl" style="margin:12px 0 0">−6 dB 覆盖角</div>
+  <div id="mcov"></div>
+</div>
+
+<div class="card">
+  <div class="lbl">各点延时（最小值归 0，两端最大；偶数点时中间两只均为 0）</div>
   <div class="tw" id="tbl"></div>
 </div>
 
@@ -102,7 +123,7 @@ function level(th,k,w){
     const ph=k*S.pos[i]*Math.sin(th)-w*S.del[i]/1000;
     re+=Math.cos(ph);im+=Math.sin(ph);
   }
-  return Math.hypot(re,im)/S.N;
+  return Math.hypot(re,im)/S.N*(CARD?(1+Math.cos(th))/2:1);
 }
 
 function calc(){
@@ -115,6 +136,7 @@ function calc(){
     const x=(i-(N-1)/2)*d;pos.push(x);
     del.push(thr>0?R*(1-Math.cos(x/R))/c*1000:0);
   }
+  const mn=Math.min(...del);for(let i=0;i<N;i++)del[i]-=mn;
   S={N,d,A,T,c,thr,L,R,pos,del};
   $("vN").textContent=N+" 点";
   $("vD").textContent=d.toFixed(2)+" m";
@@ -134,24 +156,72 @@ function calc(){
   const w=$("warn"),msgs=[];
   if(fmax<100)msgs.push("有用上限低于 100 Hz，间距偏大，常见 80–100 Hz 分频点附近会出现栅瓣，建议减小间距。");
   if(A>90&&N<4)msgs.push("点数较少而张角较大，弧形平滑度有限。");
+  if(A>120)msgs.push("张角超过 120°：有用上限随之降低，正前方声压也会明显下降，建议增加点数或改为分区覆盖。");
+  if(CARD)msgs.push("心形：按理想心形 (1+cosθ)/2 叠加，真实心形低音箱的指向随频率变化，仅在其工作频段内成立。");
   if(MODE==="line")msgs.push("直线阵列：所有点同时发声（延时为 0），声束向正前方收窄，频率越高越窄。");
   w.style.display=msgs.length?"block":"none";
   w.innerHTML=msgs.join("<br>");
   let h='<div class="h">点 #</div><div class="h">位置 (m)</div><div class="h">延时 (ms)</div>';
   for(let i=0;i<N;i++)h+="<div>"+(i+1)+"</div><div>"+pos[i].toFixed(2)+"</div><div>"+del[i].toFixed(2)+"</div>";
   $("tbl").innerHTML=h;
-  draw();
+  draw();drawSch();
 }
 
+let BW=3,SEL=[63,80,100],CARD=false;
+const FREQS=[40,50,63,80,100,125,160,200],COL=["#60a5fa","#34d399","#fbbf24","#f87171","#a78bfa","#fb923c","#22d3ee","#f472b6"];
+function pat(f){const n=720,a=[];let m=0;for(let i=0;i<n;i++){const v=lv(i/2*Math.PI/180,f);a.push(v);if(v>m)m=v}return a.map(v=>20*Math.log10(Math.max(v/m,1e-4)))}
+function cov6(a){if(a[0]<-6)return "—";let r=0,l=0;while(r<90&&a[Math.round((r+.5)*2)%720]>=-6)r+=.5;while(l>-90&&a[(720+Math.round((l-.5)*2))%720]>=-6)l-=.5;return(r>=90&&l<=-90)?"≥180°":(r-l).toFixed(0)+"°"}
+function drawMulti(){
+  const cv=$("cv2"),x=cv.getContext("2d"),W=Math.min(cv.parentElement.clientWidth-32,420),dpr=window.devicePixelRatio||1;
+  cv.style.width=W+"px";cv.style.height=W+"px";cv.width=W*dpr;cv.height=W*dpr;x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,W,W);
+  const c=W/2,Rm=W/2-22;
+  x.font="10px system-ui";x.textAlign="center";x.strokeStyle=css("--bd");x.fillStyle=css("--mut");x.lineWidth=1;
+  [0,-6,-12,-18,-24].forEach((d,i)=>{const r=Rm*(d+30)/30;x.beginPath();x.arc(c,c,r,0,2*Math.PI);x.stroke();if(i>0)x.fillText(d+"",c+3,c-r+10)});
+  for(let a=0;a<360;a+=30){const t=a*Math.PI/180;x.beginPath();x.moveTo(c,c);x.lineTo(c+Rm*Math.sin(t),c-Rm*Math.cos(t));x.stroke()}
+  ["0°","90°","180°","270°"].forEach((s,i)=>{const t=i*Math.PI/2;x.fillText(s,c+(Rm+12)*Math.sin(t),c-(Rm+12)*Math.cos(t)+3)});
+  let h="";
+  FREQS.forEach((f,j)=>{if(!SEL.includes(f))return;const a=pat(f);
+    x.beginPath();a.forEach((db,i)=>{const th=i/a.length*2*Math.PI,r=Rm*Math.max(db+30,0)/30,px=c+r*Math.sin(th),py=c-r*Math.cos(th);i?x.lineTo(px,py):x.moveTo(px,py)});
+    x.closePath();x.strokeStyle=COL[j];x.lineWidth=2;x.stroke();
+    h+='<div style="color:'+COL[j]+'">'+f+" Hz："+cov6(a)+"</div>"});
+  $("mcov").innerHTML=h||"请至少选择一个频率";
+}
+function drawSch(){
+  const cv=$("sch"),x=cv.getContext("2d"),W=Math.min(cv.parentElement.clientWidth-32,720),H=Math.round(W*.55),dpr=window.devicePixelRatio||1;
+  cv.style.width=W+"px";cv.style.height=H+"px";cv.width=W*dpr;cv.height=H*dpr;x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,W,H);
+  const {N,d,pos,R,thr,L,del}=S,ac=css("--ac"),mut=css("--mut"),wn=css("--warn"),arc=thr>0;
+  const zs=pos.map(p=>arc?R*(1-Math.cos(p/R)):0),zm=Math.max(...zs);
+  const s=Math.min((W-30)/(L+2*d),zm>0?H*.3/zm:1e9),cx=W/2,y0=H*.38,AL=H*.22;
+  const ax=i=>cx+(arc?R*Math.sin(pos[i]/R):pos[i])*s,ay=i=>y0+zs[i]*s;
+  const arrow=(x1,y1,x2,y2)=>{x.beginPath();x.moveTo(x1,y1);x.lineTo(x2,y2);x.stroke();const a=Math.atan2(y2-y1,x2-x1);x.beginPath();x.moveTo(x2,y2);x.lineTo(x2-6*Math.cos(a-.4),y2-6*Math.sin(a-.4));x.lineTo(x2-6*Math.cos(a+.4),y2-6*Math.sin(a+.4));x.closePath();x.fill()};
+  x.strokeStyle=mut;x.fillStyle=mut;x.lineWidth=1;
+  for(let i=0;i<N;i++){const ph=arc?pos[i]/R:0;arrow(ax(i),ay(i),ax(i)+AL*Math.sin(ph),ay(i)-AL*Math.cos(ph))}
+  if(arc){
+    x.strokeStyle=wn;x.setLineDash([4,4]);x.beginPath();for(let i=0;i<N;i++)i?x.lineTo(ax(i),ay(i)):x.moveTo(ax(i),ay(i));x.stroke();
+    x.setLineDash([2,3]);x.strokeStyle=mut;for(let i=0;i<N;i++){x.beginPath();x.moveTo(cx+pos[i]*s,y0);x.lineTo(ax(i),ay(i));x.stroke()}
+    x.setLineDash([]);x.strokeStyle=wn;x.lineWidth=2;for(let i=0;i<N;i++){x.beginPath();x.arc(ax(i),ay(i),5,0,2*Math.PI);x.stroke()}
+  }
+  x.fillStyle=ac;for(let i=0;i<N;i++)x.fillRect(cx+pos[i]*s-6,y0-6,12,12);
+  x.font="10px system-ui";x.textAlign="center";x.fillStyle=mut;
+  for(let i=0;i<N;i++)if(s*d>=34||i%2==0)x.fillText(del[i].toFixed(2),cx+pos[i]*s,H-6);
+  x.textAlign="left";x.fillText("■ 实际音箱  "+(arc?"○ 等效弧形位置  ":"")+"→ 指向  底部数字为延时 ms",8,14);
+}
+function lv(th,f){
+  if(!BW)return level(th,2*Math.PI*f/S.c,2*Math.PI*f);
+  const M=9,h=1/(2*BW);let s=0;
+  for(let j=0;j<M;j++){const ff=f*Math.pow(2,-h+2*h*j/(M-1));s+=Math.pow(level(th,2*Math.PI*ff/S.c,2*Math.PI*ff),2)}
+  return Math.sqrt(s/M);
+}
 function draw(){
-  const f=+$("F").value,c=S.c,k=2*Math.PI*f/c,w=2*Math.PI*f;
+  const f=+$("F").value,c=S.c;
   $("vF").textContent=f+" Hz";
+  if(BW){const h=1/(2*BW),lo=f*Math.pow(2,-h),hi=f*Math.pow(2,h);$("band").textContent="频带 "+lo.toFixed(1)+"–"+hi.toFixed(1)+" Hz"+(hi>S.fmax?"；频带上沿已超过有用上限，会受栅瓣影响":"");}else $("band").textContent="单频计算";
   $("lam").textContent=(c/f).toFixed(2)+" m";
   const n=720,L=[];let mx=0;
-  for(let i=0;i<n;i++){const th=i/n*2*Math.PI;const v=level(th,k,w);L.push(v);if(v>mx)mx=v}
+  for(let i=0;i<n;i++){const th=i/n*2*Math.PI;const v=lv(th,f);L.push(v);if(v>mx)mx=v}
   const db=v=>20*Math.log10(Math.max(v/mx,1e-4));
   // -6 dB coverage (front hemisphere, walking out from 0 deg)
-  const at=deg=>db(level(deg*Math.PI/180,k,w));
+  const at=deg=>db(lv(deg*Math.PI/180,f));
   let cov="—";
   if(at(0)>=-6){
     let r=0,l=0;
@@ -197,14 +267,17 @@ function draw(){
   ctx.closePath();
   ctx.globalAlpha=.18;ctx.fillStyle=ac;ctx.fill();ctx.globalAlpha=1;
   ctx.strokeStyle=ac;ctx.lineWidth=2;ctx.stroke();
-  ctx.fillStyle=tx;ctx.fillRect(cx-3,cy-3,6,6);
+  ctx.fillStyle=tx;ctx.fillRect(cx-3,cy-3,6,6);drawMulti();
 }
 
 document.querySelectorAll("#seg button").forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll("#seg button").forEach(x=>x.classList.toggle("on",x===b));calc()});
 ["N","D","A","T"].forEach(id=>$(id).addEventListener("input",calc));
+FREQS.forEach((f,i)=>{const b=document.createElement("button");b.className="chip"+(SEL.includes(f)?" on":"");b.style.borderLeft="4px solid "+COL[i];b.textContent=f+" Hz";b.onclick=()=>{const k=SEL.indexOf(f);if(k>=0)SEL.splice(k,1);else SEL.push(f);b.classList.toggle("on",k<0);drawMulti()};$("chips").appendChild(b)});
 $("F").addEventListener("input",draw);
+document.querySelectorAll("#seg2 button").forEach(b=>b.onclick=()=>{BW=+b.dataset.b;document.querySelectorAll("#seg2 button").forEach(x=>x.classList.toggle("on",x===b));draw()});
 $("jump").onclick=()=>{$("F").value=Math.min(250,Math.max(20,Math.round(S.fmax)));draw()};
-window.addEventListener("resize",draw);
+window.addEventListener("resize",()=>{draw();drawSch()});
+document.querySelectorAll("#seg3 button").forEach(b=>b.onclick=()=>{CARD=b.dataset.c==="1";document.querySelectorAll("#seg3 button").forEach(x=>x.classList.toggle("on",x===b));calc()});
 if("serviceWorker" in navigator)window.addEventListener("load",()=>{try{navigator.serviceWorker.register("sw.js")}catch(e){}});
 calc();
 </script>
