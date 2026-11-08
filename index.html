@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b1020">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="低音阵列">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>低音阵列计算器</title>
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--bd:#dde3ee;--tx:#111827;--mut:#6b7280;--ac:#2563eb;--ok:#059669;--warn:#d97706;--bad:#dc2626;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1020;--card:#121a2e;--bd:#24304d;--tx:#e5e9f4;--mut:#8b97b3;--ac:#60a5fa;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b1020;--card:#121a2e;--bd:#24304d;--tx:#e5e9f4;--mut:#8b97b3;--ac:#60a5fa;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px);background:var(--bg)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"PingFang SC","Helvetica Neue",system-ui,sans-serif;padding:20px 14px 48px;max-width:720px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 2px}
+.sub{font-size:12px;color:var(--mut);margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.lbl{font-size:11px;color:var(--mut);letter-spacing:.06em;margin-bottom:8px}
+.row{margin-bottom:14px}.row:last-child{margin-bottom:0}
+.rh{display:flex;justify-content:space-between;align-items:baseline;font-size:13px}
+.rh b{font-size:18px;color:var(--ac);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--ac);margin:6px 0 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.m{border:1px solid var(--bd);border-radius:10px;padding:10px 12px}
+.m span{display:block;font-size:11px;color:var(--mut)}
+.m b{font-size:19px;font-variant-numeric:tabular-nums}
+.m.hi{grid-column:1/-1;border-color:var(--ac)}
+.m.hi b{font-size:26px;color:var(--ac)}
+.m small{display:block;font-size:11px;color:var(--mut);margin-top:2px}
+#warn{font-size:12px;color:var(--warn);margin-top:10px;display:none;line-height:1.6}
+canvas{width:100%;display:block;margin:0 auto}
+button{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:7px 12px;font-size:12px;margin-top:10px}
+.tw{display:grid;grid-template-columns:repeat(3,1fr);font-size:13px;font-variant-numeric:tabular-nums}
+.tw div{padding:6px 4px;border-bottom:1px solid var(--bd);text-align:right}
+.tw div:nth-child(3n+1){text-align:left}
+.tw .h{color:var(--mut);font-size:11px}
+.note{font-size:11px;color:var(--mut);line-height:1.7}
+.seg{display:flex;gap:6px;margin-bottom:14px}.seg button{flex:1;margin:0;padding:9px 8px;font-size:13px}.seg button.on{background:var(--ac);border-color:var(--ac);color:#fff}
+</style>
+</head>
+<body>
+<h1>低音阵列计算器</h1>
+<p class="sub">水平电子弧形（延时成弧）· 等间距直线阵 · 全指向点声源模型</p>
+
+<div class="card">
+  <div class="lbl">阵列类型</div>
+  <div class="seg" id="seg"><button data-m="line">普通直线阵列</button><button data-m="arc" class="on">电子水平弧形阵列</button></div>
+  <div class="lbl">输入参数</div>
+  <div class="row"><div class="rh"><span>阵列点数量</span><b id="vN"></b></div><input type="range" id="N" min="2" max="16" step="1" value="6"></div>
+  <div class="row"><div class="rh"><span>点间距（中心到中心）</span><b id="vD"></b></div><input type="range" id="D" min="0.3" max="3" step="0.05" value="1"></div>
+  <div class="row" id="rowA"><div class="rh"><span>目标覆盖角度（弧形总张角）</span><b id="vA"></b></div><input type="range" id="A" min="0" max="180" step="5" value="90"></div>
+  <div class="row"><div class="rh"><span>环境温度</span><b id="vT"></b></div><input type="range" id="T" min="-10" max="40" step="1" value="20"></div>
+</div>
+
+<div class="card">
+  <div class="lbl">计算结果</div>
+  <div class="grid">
+    <div class="m hi"><span>有用频率上限（无栅瓣）</span><b id="fmax"></b><small id="fmaxS"></small></div>
+    <div class="m"><span>保守上限（间距 = λ/2）</span><b id="fhalf"></b></div>
+    <div class="m"><span>指向性控制下限（约）</span><b id="flow"></b></div>
+    <div class="m"><span>阵列宽度</span><b id="W"></b></div>
+    <div class="m"><span>等效弧半径 R</span><b id="R"></b></div>
+    <div class="m"><span>最大延时</span><b id="maxd"></b></div>
+    <div class="m"><span>声速</span><b id="cc"></b></div>
+  </div>
+  <div id="warn"></div>
+</div>
+
+<div class="card">
+  <div class="lbl">水平指向图（正前方在上）</div>
+  <canvas id="cv"></canvas>
+  <div class="row" style="margin-top:12px"><div class="rh"><span>观察频率</span><b id="vF"></b></div><input type="range" id="F" min="20" max="250" step="1" value="80"></div>
+  <div class="grid" style="margin-top:10px"><div class="m"><span>−6 dB 覆盖角（此频率）</span><b id="cov"></b></div><div class="m"><span>波长 λ</span><b id="lam"></b></div></div>
+  <button id="jump">跳到有用上限</button>
+</div>
+
+<div class="card">
+  <div class="lbl">各点延时（中心点为 0，两端延时最大）</div>
+  <div class="tw" id="tbl"></div>
+</div>
+
+<div class="note">
+计算说明：弧半径 R = 阵列宽度 ÷ 张角（弧度）；第 i 点延时 = R(1 − cos φᵢ) ÷ c，φᵢ 为该点沿弧位置对应的角度。有用上限取栅瓣条件 f = c ÷ [d(1 + sin(张角/2))]；保守上限取 d = λ/2。−6 dB 覆盖角按前半球数值扫描得到。实际箱体自身的指向性、混响与落地边界会改变结果，请以建模与实测为准。
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const cv=$("cv"),ctx=cv.getContext("2d");
+let S={},MODE="arc";
+function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
+function fmtF(f){return f>=1000?(f/1000).toFixed(2)+" kHz":Math.round(f)+" Hz"}
+
+function level(th,k,w){
+  let re=0,im=0;
+  for(let i=0;i<S.N;i++){
+    const ph=k*S.pos[i]*Math.sin(th)-w*S.del[i]/1000;
+    re+=Math.cos(ph);im+=Math.sin(ph);
+  }
+  return Math.hypot(re,im)/S.N;
+}
+
+function calc(){
+  const N=+$("N").value,d=+$("D").value,T=+$("T").value,A=MODE==="arc"?+$("A").value:0;
+  $("rowA").style.display=MODE==="arc"?"":"none";
+  const c=331.3+0.606*T,thr=A*Math.PI/180,L=(N-1)*d;
+  const R=thr>0?L/thr:Infinity;
+  const pos=[],del=[];
+  for(let i=0;i<N;i++){
+    const x=(i-(N-1)/2)*d;pos.push(x);
+    del.push(thr>0?R*(1-Math.cos(x/R))/c*1000:0);
+  }
+  S={N,d,A,T,c,thr,L,R,pos,del};
+  $("vN").textContent=N+" 点";
+  $("vD").textContent=d.toFixed(2)+" m";
+  $("vA").textContent=$("A").value+"°";
+  $("vT").textContent=T+"°C";
+  const fmax=c/(d*(1+Math.sin(thr/2)));
+  const fhalf=c/(2*d),flow=c/(N*d);
+  S.fmax=fmax;
+  $("fmax").textContent=fmtF(fmax);
+  $("fmaxS").textContent="λ = "+(c/fmax).toFixed(2)+" m，高于此频率出现栅瓣";
+  $("fhalf").textContent=fmtF(fhalf);
+  $("flow").textContent=fmtF(flow);
+  $("W").textContent=L.toFixed(2)+" m";
+  $("R").textContent=isFinite(R)?R.toFixed(2)+" m":"∞（直线）";
+  $("maxd").textContent=Math.max(...del).toFixed(2)+" ms";
+  $("cc").textContent=c.toFixed(1)+" m/s";
+  const w=$("warn"),msgs=[];
+  if(fmax<100)msgs.push("有用上限低于 100 Hz，间距偏大，常见 80–100 Hz 分频点附近会出现栅瓣，建议减小间距。");
+  if(A>90&&N<4)msgs.push("点数较少而张角较大，弧形平滑度有限。");
+  if(MODE==="line")msgs.push("直线阵列：所有点同时发声（延时为 0），声束向正前方收窄，频率越高越窄。");
+  w.style.display=msgs.length?"block":"none";
+  w.innerHTML=msgs.join("<br>");
+  let h='<div class="h">点 #</div><div class="h">位置 (m)</div><div class="h">延时 (ms)</div>';
+  for(let i=0;i<N;i++)h+="<div>"+(i+1)+"</div><div>"+pos[i].toFixed(2)+"</div><div>"+del[i].toFixed(2)+"</div>";
+  $("tbl").innerHTML=h;
+  draw();
+}
+
+function draw(){
+  const f=+$("F").value,c=S.c,k=2*Math.PI*f/c,w=2*Math.PI*f;
+  $("vF").textContent=f+" Hz";
+  $("lam").textContent=(c/f).toFixed(2)+" m";
+  const n=720,L=[];let mx=0;
+  for(let i=0;i<n;i++){const th=i/n*2*Math.PI;const v=level(th,k,w);L.push(v);if(v>mx)mx=v}
+  const db=v=>20*Math.log10(Math.max(v/mx,1e-4));
+  // -6 dB coverage (front hemisphere, walking out from 0 deg)
+  const at=deg=>db(level(deg*Math.PI/180,k,w));
+  let cov="—";
+  if(at(0)>=-6){
+    let r=0,l=0;
+    while(r<90&&at(r+0.5)>=-6)r+=0.5;
+    while(l>-90&&at(l-0.5)>=-6)l-=0.5;
+    cov=(r>=90&&l<=-90)?"≥ 180°":(r-l).toFixed(0)+"°";
+  }
+  $("cov").textContent=cov;
+
+  const W=Math.min(cv.parentElement.clientWidth-32,420),dpr=window.devicePixelRatio||1;
+  cv.style.width=W+"px";cv.style.height=W+"px";
+  cv.width=W*dpr;cv.height=W*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,W);
+  const cx=W/2,cy=W/2,Rm=W/2-22,mut=css("--mut"),bd=css("--bd"),ac=css("--ac"),tx=css("--tx");
+  ctx.font="10px system-ui";ctx.textAlign="center";
+  ctx.strokeStyle=bd;ctx.fillStyle=mut;ctx.lineWidth=1;
+  [0,-6,-12,-18,-24].forEach((d,i)=>{
+    const r=Rm*(d+30)/30;
+    ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.stroke();
+    if(i>0)ctx.fillText(d+"",cx+3,cy-r+10);
+  });
+  for(let a=0;a<360;a+=30){
+    const t=a*Math.PI/180;
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Rm*Math.sin(t),cy-Rm*Math.cos(t));ctx.stroke();
+  }
+  ["0°","90°","180°","270°"].forEach((s,i)=>{
+    const t=i*Math.PI/2;ctx.fillText(s,cx+(Rm+12)*Math.sin(t),cy-(Rm+12)*Math.cos(t)+3);
+  });
+  // coverage target lines
+  if(S.A>0){
+    ctx.save();ctx.strokeStyle=css("--warn");ctx.setLineDash([4,4]);
+    [-1,1].forEach(sg=>{const t=sg*S.thr/2;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Rm*Math.sin(t),cy-Rm*Math.cos(t));ctx.stroke()});
+    ctx.restore();
+  }
+  ctx.beginPath();
+  for(let i=0;i<=n;i++){
+    const th=(i%n)/n*2*Math.PI;
+    const r=Rm*Math.max(db(L[i%n])+30,0)/30;
+    const x=cx+r*Math.sin(th),y=cy-r*Math.cos(th);
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.closePath();
+  ctx.globalAlpha=.18;ctx.fillStyle=ac;ctx.fill();ctx.globalAlpha=1;
+  ctx.strokeStyle=ac;ctx.lineWidth=2;ctx.stroke();
+  ctx.fillStyle=tx;ctx.fillRect(cx-3,cy-3,6,6);
+}
+
+document.querySelectorAll("#seg button").forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll("#seg button").forEach(x=>x.classList.toggle("on",x===b));calc()});
+["N","D","A","T"].forEach(id=>$(id).addEventListener("input",calc));
+$("F").addEventListener("input",draw);
+$("jump").onclick=()=>{$("F").value=Math.min(250,Math.max(20,Math.round(S.fmax)));draw()};
+window.addEventListener("resize",draw);
+if("serviceWorker" in navigator)window.addEventListener("load",()=>{try{navigator.serviceWorker.register("sw.js")}catch(e){}});
+calc();
+</script>
+</body>
+</html>
